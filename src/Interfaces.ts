@@ -32,10 +32,10 @@ export interface IAddResolveFunctionsToSchemaOptions {
   inheritResolversFromInterfaces?: boolean;
 }
 
-export interface IResolverOptions<TSource = any, TContext = any> {
+export interface IResolverOptions<TSource = any, TContext = any, TArgs = any> {
   fragment?: string;
-  resolve?: IFieldResolver<TSource, TContext>;
-  subscribe?: IFieldResolver<TSource, TContext>;
+  resolve?: IFieldResolver<TSource, TContext, TArgs>;
+  subscribe?: IFieldResolver<TSource, TContext, TArgs>;
   __resolveType?: GraphQLTypeResolver<TSource, TContext>;
   __isTypeOf?: GraphQLIsTypeOfFn<TSource, TContext>;
 }
@@ -46,13 +46,17 @@ export type Transform = {
   transformResult?: (result: Result) => Result;
 };
 
+export interface IGraphQLToolsResolveInfo extends GraphQLResolveInfo {
+  mergeInfo?: MergeInfo;
+}
+
 export interface IDelegateToSchemaOptions<TContext = { [key: string]: any }> {
   schema: GraphQLSchema;
   operation: Operation;
   fieldName: string;
   args?: { [key: string]: any };
   context: TContext;
-  info: GraphQLResolveInfo;
+  info: IGraphQLToolsResolveInfo;
   transforms?: Array<Transform>;
   skipValidation?: boolean;
 }
@@ -67,25 +71,33 @@ export type MergeInfo = {
     transforms?: Array<Transform>,
   ) => any;
   delegateToSchema<TContext>(options: IDelegateToSchemaOptions<TContext>): any;
+  fragments: Array<{
+    field: string;
+    fragment: string;
+  }>;
 };
 
-export type IFieldResolver<TSource, TContext> = (
+export type IFieldResolver<TSource, TContext, TArgs = Record<string, any>> = (
   source: TSource,
-  args: { [argument: string]: any },
+  args: TArgs,
   context: TContext,
   info: GraphQLResolveInfo & { mergeInfo: MergeInfo },
 ) => any;
 
 export type ITypedef = (() => ITypedef[]) | string | DocumentNode;
 export type ITypeDefinitions = ITypedef | ITypedef[];
-export type IResolverObject<TSource = any, TContext = any> = {
-  [key: string]: IFieldResolver<TSource, TContext> | IResolverOptions;
+export type IResolverObject<TSource = any, TContext = any, TArgs = any> = {
+  [key: string]:
+    | IFieldResolver<TSource, TContext, TArgs>
+    | IResolverOptions<TSource, TContext>
+    | IResolverObject<TSource, TContext>;
 };
 export type IEnumResolver = { [key: string]: string | number };
 export interface IResolvers<TSource = any, TContext = any> {
   [key: string]:
     | (() => any)
     | IResolverObject<TSource, TContext>
+    | IResolverOptions<TSource, TContext>
     | GraphQLScalarType
     | IEnumResolver;
 }

@@ -9,6 +9,7 @@ import {
   ExecutionResult,
   DocumentNode,
 } from 'graphql';
+import { ExecutionResultDataDefault } from 'graphql/execution/execute';
 import {
   ApolloLink,
   Observable,
@@ -22,12 +23,15 @@ import makeRemoteExecutableSchema, {
 import introspectSchema from '../stitching/introspectSchema';
 import { PubSub } from 'graphql-subscriptions';
 
+export type Location = {
+  name: string;
+  coordinates: string;
+};
+
 export type Property = {
   id: string;
   name: string;
-  location: {
-    name: string;
-  };
+  location: Location;
 };
 
 export type Product = {
@@ -84,6 +88,7 @@ export const sampleData: {
       name: 'Super great hotel',
       location: {
         name: 'Helsinki',
+        coordinates: '60.1698° N, 24.9383° E'
       },
     },
     p2: {
@@ -91,6 +96,7 @@ export const sampleData: {
       name: 'Another great hotel',
       location: {
         name: 'San Francisco',
+        coordinates: '37.7749° N, 122.4194° W'
       },
     },
     p3: {
@@ -98,6 +104,7 @@ export const sampleData: {
       name: 'BedBugs - The Affordable Hostel',
       location: {
         name: 'Helsinki',
+        coordinates: '60.1699° N, 24.9384° E'
       },
     },
   },
@@ -418,21 +425,6 @@ let SimpleProduct = `type SimpleProduct implements Product & Sellable {
   }
 `;
 
-if (['^0.11', '^0.12'].indexOf(process.env.GRAPHQL_VERSION) !== -1) {
-  DownloadableProduct = `
-    type DownloadableProduct implements Product, Downloadable {
-      id: ID!
-      url: String!
-    }
-  `;
-
-  SimpleProduct = `type SimpleProduct implements Product, Sellable {
-      id: ID!
-      price: Int!
-    }
-  `;
-}
-
 const productTypeDefs = `
   interface Product {
     id: ID!
@@ -644,6 +636,7 @@ const bookingResolvers: IResolvers = {
 const subscriptionTypeDefs = `
   type Notification{
     text: String
+    throwError: String
   }
 
   type Query{
@@ -668,6 +661,11 @@ const subscriptionResolvers: IResolvers = {
         subscriptionPubSub.asyncIterator(subscriptionPubSubTrigger),
     },
   },
+  Notification: {
+    throwError: () => {
+      throw new Error('subscription field error');
+    }
+  }
 };
 
 export const propertySchema: GraphQLSchema = makeExecutableSchema({
@@ -711,7 +709,7 @@ export async function makeSchemaRemoteFromLink(schema: GraphQLSchema) {
         const { graphqlContext } = operation.getContext();
         try {
           if (!hasSubscriptionOperation(operation)) {
-            const result = await graphql(
+            const result: ExecutionResultDataDefault = await graphql(
               schema,
               print(query),
               null,
@@ -735,7 +733,7 @@ export async function makeSchemaRemoteFromLink(schema: GraphQLSchema) {
               'function'
             ) {
               while (true) {
-                const next = await (<AsyncIterator<ExecutionResult>>(
+                const next = await (<AsyncIterator<ExecutionResultDataDefault>>(
                   result
                 )).next();
                 observer.next(next.value as LinkExecutionResult);

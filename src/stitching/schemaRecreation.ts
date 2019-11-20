@@ -24,6 +24,11 @@ import {
   ValueNode,
   getNamedType,
   isNamedType,
+  GraphQLInt,
+  GraphQLFloat,
+  GraphQLString,
+  GraphQLBoolean,
+  GraphQLID,
 } from 'graphql';
 import isSpecifiedScalarType from '../isSpecifiedScalarType';
 import { ResolveType } from '../Interfaces';
@@ -87,7 +92,12 @@ export function recreateType(
     const values = type.getValues();
     const newValues = {};
     values.forEach(value => {
-      newValues[value.name] = { value: value.name };
+      newValues[value.name] = {
+        value: value.value,
+        deprecationReason: value.deprecationReason,
+        description: value.description,
+        astNode: value.astNode,
+      };
     });
     return new GraphQLEnumType({
       name: type.name,
@@ -96,7 +106,7 @@ export function recreateType(
       values: newValues,
     });
   } else if (type instanceof GraphQLScalarType) {
-    if (isSpecifiedScalarType(type)) {
+    if (keepResolvers || isSpecifiedScalarType(type)) {
       return type;
     } else {
       return new GraphQLScalarType({
@@ -168,7 +178,7 @@ export function fieldMapToFieldConfigMap(
 export function createResolveType(
   getType: (name: string, type: GraphQLType) => GraphQLType | null,
 ): ResolveType<any> {
-  const resolveType = <T extends GraphQLType>(type: T): T => {
+  const resolveType = <T extends GraphQLType>(type: T): T | GraphQLType => {
     if (type instanceof GraphQLList) {
       const innerType = resolveType(type.ofType);
       if (innerType === null) {
@@ -184,7 +194,21 @@ export function createResolveType(
         return new GraphQLNonNull(innerType) as T;
       }
     } else if (isNamedType(type)) {
-      return getType(getNamedType(type).name, type) as T;
+      const typeName = getNamedType(type).name;
+      switch (typeName) {
+        case GraphQLInt.name:
+          return GraphQLInt;
+        case GraphQLFloat.name:
+          return GraphQLFloat;
+        case GraphQLString.name:
+          return GraphQLString;
+        case GraphQLBoolean.name:
+          return GraphQLBoolean;
+        case GraphQLID.name:
+          return GraphQLID;
+        default:
+          return getType(typeName, type);
+      }
     } else {
       return type;
     }

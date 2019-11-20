@@ -218,7 +218,7 @@ const transformedChirpSchema = transformSchema(chirpSchema, [
     (operation: string, rootField: string) => rootField !== 'chirpsByAuthorId'
   ),
   new RenameTypes((name: string) => `Chirp_${name}`),
-  new RenameRootFields((name: string) => `Chirp_${name}`),
+  new RenameRootFields((operation: 'Query' | 'Mutation' | 'Subscription', name: string) => `Chirp_${name}`),
 ]);
 ```
 
@@ -291,7 +291,7 @@ For a more complicated example involving properties and bookings, with implement
 
 ```ts
 mergeSchemas({
-  schemas: Array<string | GraphQLSchema | Array<GraphQLNamedType>>;
+  schemas: Array<string | GraphQLSchema | DocumentNode | Array<GraphQLNamedType>>;
   resolvers?: Array<IResolvers> | IResolvers;
   onTypeConflict?: (
     left: GraphQLNamedType,
@@ -305,6 +305,8 @@ mergeSchemas({
       };
     },
   ) => GraphQLNamedType;
+  inheritResolversFromInterfaces?: boolean;
+  schemaDirectives?: { [name: string]: typeof SchemaDirectiveVisitor };
 })
 ```
 
@@ -324,7 +326,7 @@ resolvers: {
     property: {
       fragment: '... on Booking { propertyId }',
       resolve(parent, args, context, info) {
-        return mergeInfo.delegateToSchema({
+        return info.mergeInfo.delegateToSchema({
           schema: bookingSchema,
           operation: 'query',
           fieldName: 'propertyById',
@@ -406,3 +408,7 @@ const onTypeConflict = (left, right, info) => {
 ```
 
 When using schema transforms, `onTypeConflict` is often unnecessary, since transforms can be used to prevent conflicts before merging schemas. However, if you're not using schema transforms, `onTypeConflict` can be a quick way to make `mergeSchemas` produce more desirable results.
+
+#### inheritResolversFromInterfaces
+
+The `inheritResolversFromInterfaces` option is simply passed through to `addResolveFunctionsToSchema`, which is called when adding resolvers to the schema under the covers. See [`addResolveFunctionsToSchema`](/docs/graphql-tools/resolvers.md#addResolveFunctionsToSchema) for more info.

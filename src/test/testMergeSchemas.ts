@@ -9,6 +9,7 @@ import {
   subscribe,
   parse,
   ExecutionResult,
+  findDeprecatedUsages,
 } from 'graphql';
 import mergeSchemas from '../stitching/mergeSchemas';
 import {
@@ -75,6 +76,9 @@ let enumTest = `
   A type that uses an Enum.
   """
   enum Color {
+    """
+    A vivid color
+    """
     RED
   }
 
@@ -82,7 +86,10 @@ let enumTest = `
   A type that uses an Enum with a numeric constant.
   """
   enum NumericEnum {
-    TEST
+    """
+    A test description
+    """
+    TEST @deprecated(reason: "This is deprecated")
   }
 
   schema {
@@ -97,27 +104,25 @@ let enumTest = `
 
 let enumSchema: GraphQLSchema;
 
-if (process.env.GRAPHQL_VERSION !== '^0.11') {
-  enumSchema = makeExecutableSchema({
-    typeDefs: enumTest,
-    resolvers: {
-      Color: {
-        RED: '#EA3232',
+enumSchema = makeExecutableSchema({
+  typeDefs: enumTest,
+  resolvers: {
+    Color: {
+      RED: '#EA3232',
+    },
+    NumericEnum: {
+      TEST: 1,
+    },
+    Query: {
+      color() {
+        return '#EA3232';
       },
-      NumericEnum: {
-        TEST: 1,
-      },
-      Query: {
-        color() {
-          return '#EA3232';
-        },
-        numericEnum() {
-          return 1;
-        },
+      numericEnum() {
+        return 1;
       },
     },
-  });
-}
+  },
+});
 
 let linkSchema = `
   """
@@ -148,6 +153,10 @@ let linkSchema = `
     The property of the booking.
     """
     property: Property
+    """
+    A textual description of the booking.
+    """
+    textDescription: String
   }
 
   extend type Property implements Node {
@@ -176,11 +185,11 @@ let linkSchema = `
   extend type Customer implements Node
 `;
 
-const loneExtend = `
+const loneExtend = parse(`
   extend type Booking {
     foo: String!
   }
-`;
+`);
 
 let interfaceExtensionTest = `
   # No-op for older versions since this feature does not yet exist
@@ -189,122 +198,15 @@ let interfaceExtensionTest = `
   }
 `;
 
-if (['^0.11', '^0.12'].indexOf(process.env.GRAPHQL_VERSION) === -1) {
-  interfaceExtensionTest = `
-    extend interface Downloadable {
-      filesize: Int
-    }
+interfaceExtensionTest = `
+  extend interface Downloadable {
+    filesize: Int
+  }
 
-    extend type DownloadableProduct {
-      filesize: Int
-    }
-  `;
-}
-
-if (process.env.GRAPHQL_VERSION === '^0.11') {
-  scalarTest = `
-    # Description of TestScalar.
-    scalar TestScalar
-
-    # Description of AnotherNewScalar.
-    scalar AnotherNewScalar
-
-    # A type that uses TestScalar.
-    type TestingScalar {
-      value: TestScalar
-    }
-
-    type Query {
-      testingScalar: TestingScalar
-    }
-  `;
-
-  enumTest = `
-    # A type that uses an Enum.
-    enum Color {
-      RED
-    }
-
-    # A type that uses an Enum with a numeric constant.
-    enum NumericEnum {
-      TEST
-    }
-
-    schema {
-      query: Query
-    }
-
-    type Query {
-      color: Color
-      numericEnum: NumericEnum
-    }
-  `;
-
-  enumSchema = makeExecutableSchema({
-    typeDefs: enumTest,
-    resolvers: {
-      Color: {
-        RED: '#EA3232',
-      },
-      NumericEnum: {
-        TEST: 1,
-      },
-      Query: {
-        color() {
-          return '#EA3232';
-        },
-        numericEnum() {
-          return 1;
-        },
-      },
-    },
-  });
-
-  linkSchema = `
-    # A new type linking the Property type.
-    type LinkType {
-      test: String
-      # The property.
-      property: Property
-    }
-
-    interface Node {
-      id: ID!
-    }
-
-    extend type Car implements Node {
-      fakeFieldToSatisfyOldGraphQL: String
-    }
-
-    extend type Bike implements Node {
-      fakeFieldToSatisfyOldGraphQL: String
-    }
-
-    extend type Booking implements Node {
-      # The property of the booking.
-      property: Property
-    }
-
-    extend type Property implements Node {
-      # A list of bookings.
-      bookings(
-        # The maximum number of bookings to retrieve.
-        limit: Int
-      ): [Booking]
-    }
-
-    extend type Query {
-      delegateInterfaceTest: TestInterface
-      delegateArgumentTest(arbitraryArg: Int): Property
-      # A new field on the root query.
-      linkTest: LinkType
-      node(id: ID!): Node
-      nodes: [Node]
-    }
-
-    extend type Customer implements Node {}
-  `;
-}
+  extend type DownloadableProduct {
+    filesize: Int
+  }
+`;
 
 // Miscellaneous typeDefs that exercise uncommon branches for the sake of
 // code coverage.
@@ -395,6 +297,12 @@ testCombinations.forEach(async combination => {
                   context,
                   info,
                 });
+              },
+            },
+            textDescription: {
+              fragment: '... on Booking { id }',
+              resolve(parent, args, context, info) {
+                return `Booking #${parent.id}`;
               },
             },
           },
@@ -606,6 +514,20 @@ testCombinations.forEach(async combination => {
             query {
               color
               numericEnum
+              numericEnumInfo: __type(name: "NumericEnum") {
+                enumValues(includeDeprecated: true) {
+                  name
+                  description
+                  isDeprecated
+                  deprecationReason
+                }
+              }
+              colorEnumInfo: __type(name: "Color") {
+                enumValues {
+                  name
+                  description
+                }
+              }
             }
           `,
         );
@@ -616,6 +538,20 @@ testCombinations.forEach(async combination => {
             query {
               color
               numericEnum
+              numericEnumInfo: __type(name: "NumericEnum") {
+                enumValues(includeDeprecated: true) {
+                  name
+                  description
+                  isDeprecated
+                  deprecationReason
+                }
+              }
+              colorEnumInfo: __type(name: "Color") {
+                enumValues {
+                  name
+                  description
+                }
+              }
             }
           `,
         );
@@ -624,6 +560,24 @@ testCombinations.forEach(async combination => {
           data: {
             color: 'RED',
             numericEnum: 'TEST',
+            numericEnumInfo: {
+              enumValues: [
+                {
+                  description: 'A test description',
+                  name: 'TEST',
+                  isDeprecated: true,
+                  deprecationReason: 'This is deprecated',
+                },
+              ],
+            },
+            colorEnumInfo: {
+              enumValues: [
+                {
+                  description: 'A vivid color',
+                  name: 'RED',
+                },
+              ],
+            },
           },
         });
         expect(mergedResult).to.deep.equal(enumResult);
@@ -747,6 +701,63 @@ bookingById(id: "b1") {
         subscriptionPubSub.publish(subscriptionPubSubTrigger, mockNotification);
       });
 
+      it('subscription errors are working correctly in merged schema', done => {
+        const mockNotification = {
+          notifications: {
+            text: 'Hello world',
+          },
+        };
+
+        const expectedResult = {
+          data: {
+            notifications: {
+              text: 'Hello world',
+              throwError: null,
+            },
+          } as any,
+          errors: [
+            {
+              message: 'subscription field error',
+              path: ['notifications', 'throwError'],
+              locations: [
+                {
+                  line: 4,
+                  column: 15,
+                },
+              ],
+            },
+          ],
+        };
+
+        const subscription = parse(`
+          subscription Subscription {
+            notifications {
+              throwError
+              text
+            }
+          }
+        `);
+
+        let notificationCnt = 0;
+        subscribe(mergedSchema, subscription)
+          .then(results => {
+            forAwaitEach(
+              results as AsyncIterable<ExecutionResult>,
+              (result: ExecutionResult) => {
+                expect(result).to.have.property('data');
+                expect(result).to.have.property('errors');
+                expect(result.errors).to.have.lengthOf(1);
+                expect(result.errors).to.deep.equal(expectedResult.errors);
+                expect(result.data).to.deep.equal(expectedResult.data);
+                !notificationCnt++ ? done() : null;
+              },
+            ).catch(done);
+          })
+          .catch(done);
+
+        subscriptionPubSub.publish(subscriptionPubSubTrigger, mockNotification);
+      });
+
       it('links in queries', async () => {
         const mergedResult = await graphql(
           mergedSchema,
@@ -757,6 +768,7 @@ bookingById(id: "b1") {
                 name
                 bookings {
                   id
+                  textDescription
                   customer {
                     name
                   }
@@ -794,6 +806,7 @@ bookingById(id: "b1") {
               bookings: [
                 {
                   id: 'b4',
+                  textDescription: 'Booking #b4',
                   customer: {
                     name: 'Exampler Customer',
                   },
@@ -2539,40 +2552,38 @@ fragment BookingFragment on Booking {
         });
       });
 
-      if (['^0.11', '^0.12'].indexOf(process.env.GRAPHQL_VERSION) === -1) {
-        it('interface extensions', async () => {
-          const result = await graphql(
-            mergedSchema,
-            `
-              query {
-                products {
-                  id
-                  __typename
-                  ... on Downloadable {
-                    filesize
-                  }
+      it('interface extensions', async () => {
+        const result = await graphql(
+          mergedSchema,
+          `
+            query {
+              products {
+                id
+                __typename
+                ... on Downloadable {
+                  filesize
                 }
               }
-            `,
-          );
+            }
+          `,
+        );
 
-          expect(result).to.deep.equal({
-            data: {
-              products: [
-                {
-                  id: 'pd1',
-                  __typename: 'SimpleProduct',
-                },
-                {
-                  id: 'pd2',
-                  __typename: 'DownloadableProduct',
-                  filesize: 1024,
-                },
-              ],
-            },
-          });
+        expect(result).to.deep.equal({
+          data: {
+            products: [
+              {
+                id: 'pd1',
+                __typename: 'SimpleProduct',
+              },
+              {
+                id: 'pd2',
+                __typename: 'DownloadableProduct',
+                filesize: 1024,
+              },
+            ],
+          },
         });
-      }
+      });
 
       it('arbitrary transforms that return interfaces', async () => {
         const result = await graphql(
@@ -2654,6 +2665,133 @@ fragment BookingFragment on Booking {
             },
           },
         });
+      });
+
+      it('defaultMergedResolver should work with non-root aliases', async () => {
+        // Source: https://github.com/apollographql/graphql-tools/issues/967
+        const typeDefs = `
+          type Query {
+            book: Book
+          }
+          type Book {
+            category: String!
+          }
+        `;
+        let schema = makeExecutableSchema({ typeDefs });
+
+        const resolvers = {
+          Query: {
+            book: () => ({ category: 'Test' })
+          }
+        };
+
+        schema = mergeSchemas({
+          schemas: [schema],
+          resolvers
+        });
+
+        const result = await graphql(
+          schema,
+          `{ book { cat: category } }`,
+        );
+
+        expect(result.data.book.cat).to.equal('Test');
+      });
+    });
+
+    describe('deprecation', () => {
+      it('should retain deprecation information', async () => {
+        const typeDefs = `
+          type Query {
+            book: Book
+          }
+          type Book {
+            category: String! @deprecated(reason: "yolo")
+          }
+        `;
+
+        const query = `query {
+          book {
+            category
+          }
+        }`;
+
+        const resolvers = {
+          Query: {
+            book: () => ({ category: 'Test' })
+          }
+        };
+
+        const schema = mergeSchemas({
+          schemas: [propertySchema, typeDefs],
+          resolvers
+        });
+
+        const deprecatedUsages = findDeprecatedUsages(schema, parse(query));
+        expect(deprecatedUsages).not.empty;
+        expect(deprecatedUsages.length).to.equal(1);
+        expect(deprecatedUsages.find(error => Boolean(error && error.message.match(/deprecated/) && error.message.match(/yolo/))));
+      });
+    });
+  });
+
+  describe('scalars without executable schema', () => {
+    it('can merge and query schema', async () => {
+      const BookSchema = `
+        type Book {
+          name: String
+        }
+      `;
+
+      const AuthorSchema = `
+        type Query {
+          book: Book
+        }
+
+        type Author {
+          name: String
+        }
+
+        type Book {
+          author: Author
+        }
+      `;
+
+      const resolvers = {
+        Query: {
+          book: () => ({
+            author: {
+              name: 'JRR Tolkien',
+            },
+          }),
+        },
+      };
+
+      const result = await graphql(
+        mergeSchemas({ schemas: [BookSchema, AuthorSchema], resolvers }),
+        `
+          query {
+            book {
+              author {
+                name
+              }
+            }
+          }
+        `,
+        {},
+        {
+          test: 'Foo',
+        },
+      );
+
+      expect(result).to.deep.equal({
+        data: {
+          book: {
+            author: {
+              name: 'JRR Tolkien',
+            },
+          },
+        },
       });
     });
   });

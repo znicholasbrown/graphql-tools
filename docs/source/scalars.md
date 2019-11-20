@@ -105,7 +105,10 @@ const resolverFunctions = {
   MyCustomScalar: myCustomScalarType
 };
 
-const jsSchema = makeExecutableSchema({ typeDefs: schemaString, resolvers: resolveFunctions });
+const jsSchema = makeExecutableSchema({
+  typeDefs: schemaString,
+  resolvers: resolverFunctions,
+});
 ```
 
 <h2 id="examples">Custom scalar examples</h2>
@@ -144,7 +147,7 @@ const resolverMap = {
     },
     parseLiteral(ast) {
       if (ast.kind === Kind.INT) {
-        return parseInt(ast.value, 10); // ast value is always in string format
+        return new Date(ast.value) // ast value is always in string format
       }
       return null;
     },
@@ -255,7 +258,7 @@ const resolvers = {
   Query: {
     favoriteColor: () => 'RED',
     avatar: (root, args) => {
-      // args.favoriteColor is 'RED', 'GREEN', or 'BLUE'
+      // args.borderColor is 'RED', 'GREEN', or 'BLUE'
     },
   }
 };

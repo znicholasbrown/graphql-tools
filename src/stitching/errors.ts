@@ -1,7 +1,14 @@
-import { GraphQLResolveInfo, responsePathAsArray } from 'graphql';
+import {
+  GraphQLResolveInfo,
+  responsePathAsArray,
+  ExecutionResult,
+  GraphQLFormattedError,
+  GraphQLError,
+} from 'graphql';
 import { locatedError } from 'graphql/error';
+import { getResponseKeyFromInfo } from './getResponseKeyFromInfo';
 
-let ERROR_SYMBOL: any;
+export let ERROR_SYMBOL: any;
 if (
   (typeof global !== 'undefined' && 'Symbol' in global) ||
   (typeof window !== 'undefined' && 'Symbol' in window)
@@ -11,47 +18,46 @@ if (
   ERROR_SYMBOL = '@@__subSchemaErrors';
 }
 
-export const ErrorSymbol = ERROR_SYMBOL;
-
 export function annotateWithChildrenErrors(
   object: any,
-  childrenErrors: Array<{ path?: Array<string | number> }>,
+  childrenErrors: ReadonlyArray<GraphQLFormattedError>
 ): any {
-  if (childrenErrors && childrenErrors.length > 0) {
-    if (Array.isArray(object)) {
-      const byIndex = {};
-      childrenErrors.forEach(error => {
-        if (!error.path) {
-          return;
-        }
-        const index = error.path[1];
-        const current = byIndex[index] || [];
-        current.push({
-          ...error,
-          path: error.path.slice(1),
-        });
-        byIndex[index] = current;
-      });
-      return object.map((item, index) =>
-        annotateWithChildrenErrors(item, byIndex[index]),
-      );
-    } else {
-      return {
-        ...object,
-        [ERROR_SYMBOL]: childrenErrors.map(error => ({
-          ...error,
-          ...error.path ? { path: error.path.slice(1) } : {},
-        })),
-      };
-    }
-  } else {
+  if (!childrenErrors || childrenErrors.length === 0) {
+    // Nothing to see here, move along
     return object;
   }
+
+  if (Array.isArray(object)) {
+    const byIndex = {};
+
+    childrenErrors.forEach(error => {
+      if (!error.path) {
+        return;
+      }
+      const index = error.path[1];
+      const current = byIndex[index] || [];
+      current.push({
+        ...error,
+        path: error.path.slice(1)
+      });
+      byIndex[index] = current;
+    });
+
+    return object.map((item, index) => annotateWithChildrenErrors(item, byIndex[index]));
+  }
+
+  return {
+    ...object,
+    [ERROR_SYMBOL]: childrenErrors.map(error => ({
+      ...error,
+      ...(error.path ? { path: error.path.slice(1) } : {})
+    }))
+  };
 }
 
 export function getErrorsFromParent(
   object: any,
-  fieldName: string,
+  fieldName: string
 ):
   | {
       kind: 'OWN';
@@ -59,74 +65,75 @@ export function getErrorsFromParent(
     }
   | {
       kind: 'CHILDREN';
-      errors?: Array<{ path?: Array<string | number> }>;
+      errors?: Array<GraphQLFormattedError>;
     } {
   const errors = (object && object[ERROR_SYMBOL]) || [];
-  const childrenErrors: Array<{ path?: Array<string | number> }> = [];
+  const childrenErrors: Array<GraphQLFormattedError> = [];
+
   for (const error of errors) {
-    if ((!error.path) || (error.path.length === 1 && error.path[0] === fieldName)) {
+    if (!error.path || (error.path.length === 1 && error.path[0] === fieldName)) {
       return {
         kind: 'OWN',
-        error,
+        error
       };
     } else if (error.path[0] === fieldName) {
       childrenErrors.push(error);
     }
   }
+
   return {
     kind: 'CHILDREN',
-    errors: childrenErrors,
+    errors: childrenErrors
   };
 }
 
 class CombinedError extends Error {
-  public errors: Error[];
-  constructor(message: string, errors: Error[]) {
+  public errors: ReadonlyArray<GraphQLError>;
+  constructor(message: string, errors: ReadonlyArray<GraphQLError>) {
     super(message);
     this.errors = errors;
   }
 }
 
 export function checkResultAndHandleErrors(
-  result: any,
+  result: ExecutionResult,
   info: GraphQLResolveInfo,
-  responseKey?: string,
+  responseKey?: string
 ): any {
   if (!responseKey) {
-    responseKey = info.fieldNodes[0].alias
-      ? info.fieldNodes[0].alias.value
-      : info.fieldName;
+    responseKey = getResponseKeyFromInfo(info);
   }
+
   if (result.errors && (!result.data || result.data[responseKey] == null)) {
     // apollo-link-http & http-link-dataloader need the
     // result property to be passed through for better error handling.
     // If there is only one error, which contains a result property, pass the error through
     const newError =
       result.errors.length === 1 && hasResult(result.errors[0])
-        ? result.errors[0]
+        ? new GraphQLError(
+            result.errors[0].message,
+            result.errors[0].nodes,
+            result.errors[0].source,
+            result.errors[0].positions,
+            result.errors[0].path,
+            result.errors[0],
+            result.errors[0].extensions
+          )
         : new CombinedError(concatErrors(result.errors), result.errors);
-
-    throw locatedError(
-      newError,
-      info.fieldNodes,
-      responsePathAsArray(info.path),
-    );
-  } else {
-    let resultObject = result.data[responseKey];
-    if (result.errors) {
-      resultObject = annotateWithChildrenErrors(
-        resultObject,
-        result.errors as Array<{ path?: Array<string> }>,
-      );
-    }
-    return resultObject;
+    throw locatedError(newError, info.fieldNodes, responsePathAsArray(info.path));
   }
+
+  let resultObject = result.data[responseKey];
+  if (result.errors) {
+    resultObject = annotateWithChildrenErrors(resultObject, result.errors as ReadonlyArray<GraphQLFormattedError>);
+  }
+  return resultObject;
 }
 
-function concatErrors(errors: Error[]) {
+function concatErrors(errors: ReadonlyArray<GraphQLError>) {
   return errors.map(error => error.message).join('\n');
 }
 
 function hasResult(error: any) {
-  return error.result || (error.originalError && error.originalError.result);
+  return error.result || error.extensions || (error.originalError && error.originalError.result);
 }
